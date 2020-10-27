@@ -22,6 +22,6 @@ So, generally you could say we are:
 2) Retrieving the RSA public key and encrypting the AES Key with it
 3) Send the AES Key/IV to the Miniserver in a key exchange
 4) Request an authentication token (as we assume that we don't have one yet)
- 4a) Hash the User and Password to pass to the Miniserver to get the token
- 4b) Encrypt the Command using the AES Key and IV
+ a) Hash the User and Password to pass to the Miniserver to get the token
+ b) Encrypt the Command using the AES Key and IV
 5) wait for something to happen (maybe you now press some key in your home...)
