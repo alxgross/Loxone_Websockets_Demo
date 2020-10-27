@@ -6,7 +6,7 @@ Developed with Thonny (running python 3.7.7) - a simple but helpful python IDE (
 This is a demo program to establish a websocket connection to the loxone miniserver
 Referencing https://www.loxone.com/dede/wp-content/uploads/sites/2/2020/05/1100_Communicating-with-the-Miniserver.pdf
 
-# Summary
+## Summary
 Connecting to a Miniserver Ver.1
 Due to security requirements, the communication between Miniserver and client needs to be encrypted.
 In order to allow random clients to connect, a fixed shared secret cannot be used. However, as en encryption
@@ -22,6 +22,6 @@ So, generally you could say we are:
 2) Retrieving the RSA public key and encrypting the AES Key with it
 3) Send the AES Key/IV to the Miniserver in a key exchange
 4) Request an authentication token (as we assume that we don't have one yet)
- a) Hash the User and Password to pass to the Miniserver to get the token
- b) Encrypt the Command using the AES Key and IV
+    1) Hash the User and Password to pass to the Miniserver to get the token
+    2) Encrypt the Command using the AES Key and IV
 5) wait for something to happen (maybe you now press some key in your home...)
