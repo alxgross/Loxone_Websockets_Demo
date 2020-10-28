@@ -37,7 +37,7 @@ import json      #working with JSON
 import hashlib   #Hashing
 import hmac      #Key-Hashing
 import urllib    #necessary to encode URI-compliant
-import os        #to access environment variables in .env
+from settings import Env  #your settings.py
 
 #Some Configuration/Definition --> Edit as needed
 
@@ -45,32 +45,28 @@ import os        #to access environment variables in .env
 aes_key = str("6A586E3272357538782F413F4428472B4B6250655368566B5970337336763979")
 aes_iv = str("782F413F442A472D4B6150645367566B")
 
-# Configuration
+# Configuration 
 
 #Either you have a .env-File with the following settings OR Fill your own values here in the script
 #LOX_USER = "user1"
 #LOX_PASSWORD = "passwordxyz"
 #LOX_IP = "192.168.1.1"
 #LOX_PORT = "80"
-try:
-    myUser = os.environ["LOX_USER"]
-except:
-    myUser = "user1"
-    
-try:
-    myPassword = os.environ["LOX_PASSWORD"]
-except:
-    myPassword = "passwordxyz"
-    
-try:
-    myIP = os.environ["LOX_IP"]
-except:
-    myIP = "192.168.1.1"
+env = Env("LOX_")
+myConfig = {
+    'user': 'user2',
+    'password' : 'dkdk',
+    'ip' : '192.168.2.1',
+    'port' : '8080'
+    }
+env.setDefaults(myConfig)
 
-try:
-    myPort = os.environ["LOX_PORT"]
-except:
-    myPort = "80"
+myUser = env.user
+myPassword = env.password
+myIP = env.ip
+myPort = env.port
+
+print(myUser, myPassword, myIP, myPort)
 
 myUUID = "093302e1-02b4-603c-ffa4ege000d80cfd" #A UUID of your choosing --> you can use the one supplied as well
 myIdentifier = "lox_test_script" #an identifier of your chosing
