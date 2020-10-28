@@ -38,6 +38,8 @@ import hashlib   #Hashing
 import hmac      #Key-Hashing
 import urllib    #necessary to encode URI-compliant
 from settings import Env  #your settings.py
+from bitstring import ConstBitStream #install bistring --> necessary to deal with Bit-Messages
+
 
 #Some Configuration/Definition --> Edit as needed
 
@@ -66,14 +68,80 @@ myPassword = env.password
 myIP = env.ip
 myPort = env.port
 
-print(myUser, myPassword, myIP, myPort)
-
 myUUID = "093302e1-02b4-603c-ffa4ege000d80cfd" #A UUID of your choosing --> you can use the one supplied as well
 myIdentifier = "lox_test_script" #an identifier of your chosing
 myPermission = 2 #2 for short period, 4 for long period
 
 rsa_pub_key = None #possibility to set the key for debugging, e.g. "-----BEGIN PUBLIC KEY-----\nMxxxvddfDCBiQKBgQCvuJAG7r0FdysdfsdfBl/dDbxyu1h0KQdsf7cmm7mhnNPCevRVjRB+nlK5lljt1yMqJtoQszZqCuqP8ZKKOL1gsp7F0E+xgZjOpsNRcLxglGImS6ii0oTiyDgAlS78+mZrYwvow3d05eQlhz6PzqhAh9ZHQIDAQAB\n-----END PUBLIC KEY-----"
 
+### Classes used ###
+
+#Description of a Loxone Header message (page 14)
+class LoxHeader:
+#    typedef struct {
+#      BYTE cBinType; // fix 0x03 --> fixed marking a header, raise exception if not there
+#      BYTE cIdentifier; // 8-Bit Unsigned Integer (little endian) --> Kind of message following the header
+#            0: Text  1: Binary  2,3,4: Event Tables  5: out-of-service   6: Keep-alive  7: Wheather
+#      BYTE cInfo; // Info
+#      BYTE cReserved; // reserved
+#      UINT nLen; // 32-Bit Unsigned Integer (little endian)
+    msg_type = None
+    exact2Follow = False
+
+    def __init__(self, header_msg: bytes):
+        #First byte
+        if header_msg[0:1] != bytes.fromhex('03'):
+            raise ValueError("This is not a header message")
+        self.msg_type = self.__setIdentifier(header_msg[1:2])
+        self.exact2Follow = self.__setExact2Follow(header_msg[2:3])
+        #Bytes 4-8 could be decoded some other time --> would allow prediction of load times
+        
+        
+    def __setIdentifier(self, secondByte: bytes):
+        switch_dict = {
+            b'\x00': 'text', #"Text-Message"
+            b'\x01': 'bin', #"Binary File"
+            b'\x02': 'value', #"Event-Table of Value-States
+            b'\x03': 'text' # Event-Table of Text-STates
+            }
+        return switch_dict.get(secondByte, "invalid")
+    
+    def __setExact2Follow(self, thirdByte: bytes):
+        bitstream = ConstBitStream(thirdByte)
+        bitstream.pos = 0
+        if bitstream.read('bin:1') == '1':
+            return True
+        else:
+            return False
+            
+    
+class LoxValueState:
+    #Consists of UUID (16 byte) and Value 64-Bit Float (little endian) value
+    #     Binary-Structure of a UUID
+    # typedef struct _UUID {
+    #  unsigned long Data1; // 32-Bit Unsigned Integer (little endian)
+    #  unsigned short Data2; // 16-Bit Unsigned Integer (little endian)
+    #  unsigned short Data3; // 16-Bit Unsigned Integer (little endian)
+    #  unsigned char Data4[8]; // 8-Bit Uint8Array [8] (little endian)
+    #Example from the structure-file in json however:
+    # UUID: "12c3abc1-024e-1135-ffff7ba5fa36c093","name":"Gästezimmer UG Süd"
+    # The strings are the hex representations of the numbers
+    uuid  = "" #UUID as String
+    value = 0  #Value as Float
+    
+    def __init__(self, valueStateMsg: bytes):
+        #for BitStream: https://bitstring.readthedocs.io/en/latest/constbitstream.html?highlight=read#bitstring.ConstBitStream.read
+        
+        bitstream = ConstBitStream(valueStateMsg[0:16])
+        data1, data2, data3, data41, data42, data43, data44, data45, data46, data47, data48 = bitstream.unpack('uint:32, uint:16, uint:16, uint:8, uint:8, uint:8, uint:8, uint:8, uint:8, uint:8, uint:8')
+        self.uuid = "{:x}-{:x}-{:x}-{:x}{:x}{:x}{:x}{:x}{:x}{:x}{:x}".format(data1, data2, data3, data41, data42, data43, data44, data45, data46, data47, data48)
+        bitstream = ConstBitStream(valueStateMsg[16:24])
+        value = bitstream.unpack('floatle:64')
+        self.value ="{}".format(value)
+
+class LoxState:
+    #Data Structures according to page 14
+    pass
 
 ### These are the functions used ###
 ### sync functions ###
@@ -116,7 +184,7 @@ async def webSocketLx():
         #Sending encrypted commands over the websocket (page 27, step 1)
         # Get the JSON web token (page 22, 23)
         getTokenCommand = "salt/{}/jdev/sys/getjwt/{}/{}/{}/{}/{}".format(aes_salt, await hashUserPw(myUser, myPassword), myUser, myPermission, myUUID, myIdentifier)
-        print(getTokenCommand)
+        print("Get Token Command to be encrypted: ", getTokenCommand)
         
         #Now encrypt the command with AES (page 21 step 1 & 2)
         encrypted_command = await aes_enc(getTokenCommand, aes_key, aes_iv)
@@ -126,8 +194,24 @@ async def webSocketLx():
         #Send message to get a JSON webtoken
         await myWs.send(message_to_ws)
         await myWs.recv()
-        print(await myWs.recv()) #And if you get back a 200 the connection is established
+        print("Answer to the Token-Command: ", await myWs.recv()) #And if you get back a 200 the connection is established
         
+        #Get the structure file from the Miniserver (page 18)
+        await myWs.send("data/LoxAPP3.json")
+        header = LoxHeader(await myWs.recv())
+        print(header.msg_type)
+        #print("Structure File: ", json.dumps(structure_file))
+        
+        await myWs.send("jdev/sps/enablebinstatusupdate")
+        
+        for i in range(0, 15):
+            header = LoxHeader(await myWs.recv())
+            if header.msg_type == 'value':
+                valueState = LoxValueState(await myWs.recv())
+                print("UUID: ", valueState.uuid, "Value: ", valueState.value)
+            else:
+                print("Message coming from Loxone: ", await myWs.recv())
+            await asyncio.sleep(2)
         
 # Function to RSA encrypt the AES key and iv
 async def create_sessionkey(aes_key, aes_iv):
