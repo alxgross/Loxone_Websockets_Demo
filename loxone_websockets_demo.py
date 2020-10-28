@@ -37,6 +37,7 @@ import json      #working with JSON
 import hashlib   #Hashing
 import hmac      #Key-Hashing
 import urllib    #necessary to encode URI-compliant
+import os        #to access environment variables in .env
 
 #Some Configuration/Definition --> Edit as needed
 
@@ -44,11 +45,32 @@ import urllib    #necessary to encode URI-compliant
 aes_key = str("6A586E3272357538782F413F4428472B4B6250655368566B5970337336763979")
 aes_iv = str("782F413F442A472D4B6150645367566B")
 
-#Fill your own values
-myUser = "user1"
-myPassword = "passwordxyz"
-myIP = "192.168.1.1"
-myPort = "80"
+# Configuration
+
+#Either you have a .env-File with the following settings OR Fill your own values here in the script
+#LOX_USER = "user1"
+#LOX_PASSWORD = "passwordxyz"
+#LOX_IP = "192.168.1.1"
+#LOX_PORT = "80"
+try:
+    myUser = os.environ["LOX_USER"]
+except:
+    myUser = "user1"
+    
+try:
+    myPassword = os.environ["LOX_PASSWORD"]
+except:
+    myPassword = "passwordxyz"
+    
+try:
+    myIP = os.environ["LOX_IP"]
+except:
+    myIP = "192.168.1.1"
+
+try:
+    myPort = os.environ["LOX_PORT"]
+except:
+    myPort = "80"
 
 myUUID = "093302e1-02b4-603c-ffa4ege000d80cfd" #A UUID of your choosing --> you can use the one supplied as well
 myIdentifier = "lox_test_script" #an identifier of your chosing
@@ -56,13 +78,18 @@ myPermission = 2 #2 for short period, 4 for long period
 
 rsa_pub_key = None #possibility to set the key for debugging, e.g. "-----BEGIN PUBLIC KEY-----\nMxxxvddfDCBiQKBgQCvuJAG7r0FdysdfsdfBl/dDbxyu1h0KQdsf7cmm7mhnNPCevRVjRB+nlK5lljt1yMqJtoQszZqCuqP8ZKKOL1gsp7F0E+xgZjOpsNRcLxglGImS6ii0oTiyDgAlS78+mZrYwvow3d05eQlhz6PzqhAh9ZHQIDAQAB\n-----END PUBLIC KEY-----"
 
-### THIS is the actual program that executes - type: python loxone_websockets_demo.py ###
-
-rsa_pub_key = prepareRsaKey() #Retrieve the public RSA key of the miniserver (page 7, step 2)
-asyncio.get_event_loop().run_until_complete(webSocketLx()) #Start the eventloop (async) with the function webSocketLx
-
 
 ### These are the functions used ###
+### sync functions ###
+# Get the RSA public key from the miniserver and format it so that it is compliant with a .PEM file 
+def prepareRsaKey():
+    response = requests.get("http://{}:{}/jdev/sys/getPublicKey".format(myIP, myPort))
+    rsa_key_malformed = response.json()["LL"]["value"]
+    rsa_key_malformed = rsa_key_malformed.replace("-----BEGIN CERTIFICATE-----", "-----BEGIN PUBLIC KEY-----\n")
+    rsa_key_wellformed = rsa_key_malformed.replace("-----END CERTIFICATE-----", "\n-----END PUBLIC KEY-----")
+    print("RSA Public Key: ", rsa_key_wellformed)
+    return rsa_key_wellformed
+
 
 #Async Functions
 
@@ -180,14 +207,10 @@ async def digest_hmac_sha1(message, key):
     return signature2.decode()
     
     
-### sync functions ###
-# Get the RSA public key from the miniserver and format it so that it is compliant with a .PEM file 
-def prepareRsaKey():
-    response = requests.get("http://{}:{}/jdev/sys/getPublicKey".format(myIP, myPort))
-    rsa_key_malformed = response.json()["LL"]["value"]
-    rsa_key_malformed = rsa_key_malformed.replace("-----BEGIN CERTIFICATE-----", "-----BEGIN PUBLIC KEY-----\n")
-    rsa_key_wellformed = rsa_key_malformed.replace("-----END CERTIFICATE-----", "\n-----END PUBLIC KEY-----")
-    print("RSA Public Key: ", rsa_key_wellformed)
-    return rsa_key_wellformed
+### THIS is the actual program that executes - type: python loxone_websockets_demo.py ###
+rsa_pub_key = prepareRsaKey() #Retrieve the public RSA key of the miniserver (page 7, step 2)
+asyncio.get_event_loop().run_until_complete(webSocketLx()) #Start the eventloop (async) with the function webSocketLx
+
+
     
 
