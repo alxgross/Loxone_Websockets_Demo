@@ -39,7 +39,7 @@ import hmac      #Key-Hashing
 import urllib    #necessary to encode URI-compliant
 from settings import Env  #your settings.py
 from bitstring import ConstBitStream #install bistring --> necessary to deal with Bit-Messages
-
+from nested_lookup import nested_lookup # install nested-lookup --> great for the dict with all UUIDs
 
 #Some Configuration/Definition --> Edit as needed
 
@@ -102,7 +102,11 @@ class LoxHeader:
             b'\x00': 'text', #"Text-Message"
             b'\x01': 'bin', #"Binary File"
             b'\x02': 'value', #"Event-Table of Value-States
-            b'\x03': 'text' # Event-Table of Text-STates
+            b'\x03': 'text', # Event-Table of Text-States
+            b'\x04': 'daytimer', #Event-Table of Daytimer-States
+            b'\x05': 'out-of-service', #e.g. Firmware-Upgrade - no following message at all. Connection closes
+            b'\x06': 'still_alive', #response to keepalive-message
+            b'\x07': 'weather' # Event-Table of Wheather-States
             }
         return switch_dict.get(secondByte, "invalid")
     
@@ -114,9 +118,27 @@ class LoxHeader:
         else:
             return False
             
+# Base Class for State Messages
+class LoxState:
     
-class LoxValueState:
+    @staticmethod
+    def decodeUUID(uuid: bytes) -> str:
+
+        #Decode UUID
+        bitstream = ConstBitStream(uuid)
+        data1, data2, data3, data41, data42, data43, data44, data45, data46, data47, data48 = bitstream.unpack('uint:32, uint:16, uint:16, uint:8, uint:8, uint:8, uint:8, uint:8, uint:8, uint:8, uint:8')
+        uuid = "{:x}-{:x}-{:x}-{:x}{:x}{:x}{:x}{:x}{:x}{:x}{:x}".format(data1, data2, data3, data41, data42, data43, data44, data45, data46, data47, data48)
+        return uuid
+   
+    def setUUID(self, uuid: bytes):
+        self.uuid  = "" #UUID as String
+
+        self.uuid = LoxState.decodeUUID(uuid)
+   
+class LoxValueState(LoxState):
     #Consists of UUID (16 byte) and Value 64-Bit Float (little endian) value
+    # Each State-Entry in the table is consequently 24 byte long
+    #
     #     Binary-Structure of a UUID
     # typedef struct _UUID {
     #  unsigned long Data1; // 32-Bit Unsigned Integer (little endian)
@@ -126,22 +148,63 @@ class LoxValueState:
     #Example from the structure-file in json however:
     # UUID: "12c3abc1-024e-1135-ffff7ba5fa36c093","name":"Gästezimmer UG Süd"
     # The strings are the hex representations of the numbers
-    uuid  = "" #UUID as String
-    value = 0  #Value as Float
     
     def __init__(self, valueStateMsg: bytes):
         #for BitStream: https://bitstring.readthedocs.io/en/latest/constbitstream.html?highlight=read#bitstring.ConstBitStream.read
         
-        bitstream = ConstBitStream(valueStateMsg[0:16])
-        data1, data2, data3, data41, data42, data43, data44, data45, data46, data47, data48 = bitstream.unpack('uint:32, uint:16, uint:16, uint:8, uint:8, uint:8, uint:8, uint:8, uint:8, uint:8, uint:8')
-        self.uuid = "{:x}-{:x}-{:x}-{:x}{:x}{:x}{:x}{:x}{:x}{:x}{:x}".format(data1, data2, data3, data41, data42, data43, data44, data45, data46, data47, data48)
+        self.value = 0  #Value as Float
+        
+        LoxState.__init__(self)
+        
+        self.setUUID(valueStateMsg[0:16])
+        
+        #Decode Value
         bitstream = ConstBitStream(valueStateMsg[16:24])
-        value = bitstream.unpack('floatle:64')
-        self.value ="{}".format(value)
+        value_list = bitstream.unpack('floatle:64')
+        self.value = "{:g}".format(value_list[0])
+        
+           
+        
+    @classmethod #cls is a "keyword" for the class itself. Hence, parseTable is not bound to an instance  
+    def parseTable(cls, eventTable: bytes) -> dict:
+        # take a longer message and split it and create ValueState-Instances
+        # Return a dict with UUIDs and values
+        instances = list()
 
-class LoxState:
-    #Data Structures according to page 14
-    pass
+        for i in range(0, len(eventTable), 24):
+            instances.append( cls(eventTable[i:i+24]) ) # cls() creates an instance of the class itself
+            
+        values = dict()
+        for inst in instances:
+            values[inst.uuid] = inst.value
+            
+        return values
+    
+# Text State - derived from LoxState
+class LoxTextState(LoxState):
+    #instance variables: uuid, uuid_icon, text
+    #page 17/16 in Loxone Guide
+    #typedef​ ​struct​ { ​// starts at multiple of 4
+    #   PUUID​ ​uuid​; // 128-Bit uuid
+    #   PUUID​ ​uuidIcon​; // 128-Bit uuid of icon
+    # ​  unsigned long ​textLength;  // 32-Bit Unsigned Integer (little endian)
+    #      // text follows here
+    # } ​PACKED​ ​EvDataText​;
+    
+    def __init__(self, message):
+        LoxState.__init__()
+        
+        # extract UUID
+        self.setUUID(self, message[0:16])
+        
+        # extract icon UUID
+        self.uuid_icon = LoxState.decodeUUID(message[16:32])
+        
+        # calculate Text length
+        
+        # extract Text
+    
+   
 
 ### These are the functions used ###
 ### sync functions ###
@@ -201,14 +264,22 @@ async def webSocketLx():
         header = LoxHeader(await myWs.recv())
         print(header.msg_type)
         #print("Structure File: ", json.dumps(structure_file))
+        print(await myWs.recv())
+        structure_file = await myWs.recv()
+        struct_dict = json.loads(structure_file)
         
         await myWs.send("jdev/sps/enablebinstatusupdate")
         
         for i in range(0, 15):
             header = LoxHeader(await myWs.recv())
             if header.msg_type == 'value':
-                valueState = LoxValueState(await myWs.recv())
-                print("UUID: ", valueState.uuid, "Value: ", valueState.value)
+                message = await myWs.recv()
+                statesDict = LoxValueState.parseTable(message)
+                print(statesDict)
+                    
+                valueState = LoxValueState(message)
+                print("UUID: ", valueState.uuid, "Value: ", valueState.value, "Name: ", nested_lookup(valueState.uuid, struct_dict, with_keys = True))
+                
             else:
                 print("Message coming from Loxone: ", await myWs.recv())
             await asyncio.sleep(2)
